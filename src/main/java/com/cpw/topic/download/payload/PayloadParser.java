@@ -13,7 +13,6 @@ public final class PayloadParser {
 
     private static final int OUTER_HEADER_BYTES = 2;
     private static final int CRC_BYTES = 1;
-    private static final int CAN_HEADER = 0xAABB;
 
     private final CanFrameParser canFrameParser = new CanFrameParser();
 
@@ -47,7 +46,7 @@ public final class PayloadParser {
         String crcHex = reader.readHex(CRC_BYTES);
 
         // 5. compression flag=0：body 本身就是 deviceType 开始的数据。
-        //    compression flag!=0：body 是 [压缩数据]，按参考实现使用 DEFLATE 解压。
+        //    compression flag!=0：body 是压缩数据，按参考实现使用 DEFLATE 解压。
         byte[] decompressed = compressFlag == 0 ? body : inflate(body);
         HexReader bodyReader = new HexReader(toHex(decompressed));
 
@@ -108,8 +107,6 @@ public final class PayloadParser {
             return output.toByteArray();
         } catch (DataFormatException e) {
             throw new PayloadParseException("DEFLATE 解压失败", 0, e);
-        } catch (java.io.IOException e) {
-            throw new PayloadParseException("创建解压输出失败", 0, e);
         } finally {
             inflater.end();
         }
