@@ -5,77 +5,132 @@ import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
 /**
- * 单个 Payload 的总入口。
+ * 单个 MQTT Payload 的解析入口。
  *
- * <p>这个类没有任何 Session 字段，因此每次 parse 都是一次独立解析。</p>
+ * <p>当前实现只负责一个 Payload，不保存任何跨 Payload 状态。</p>
+ *
+ * <p>根据当前提供的真实 payload 样本，外层结构为：</p>
+ * <pre>
+ * Header             2 byte
+ * StartTimeSec       4 byte
+ * StartTimeMsec      2 byte
+ * PacketLength       4 byte
+ * CompressFlag       1 byte
+ * Data               PacketLength byte
+ * CRC                1 byte
+ * </pre>
+ *
+ * <p>样本中可以看到类似：
+ * {@code ccdd ... 000023d8 01 789c ...}。
+ * 其中 {@code 01} 表示后面的 Data 使用 zlib/DEFLATE 压缩，
+ * {@code 789c} 是实际压缩数据的 zlib 头。</p>
  */
 public final class PayloadParser {
 
-    private static final int OUTER_HEADER_BYTES = 2;
+    private static final String EXPECTED_HEADER = "ccdd";
+    private static final int HEADER_BYTES = 2;
+    private static final int START_TIME_SEC_BYTES = 4;
+    private static final int START_TIME_MSEC_BYTES = 2;
+    private static final int PACKET_LENGTH_BYTES = 4;
+    private static final int COMPRESS_FLAG_BYTES = 1;
     private static final int CRC_BYTES = 1;
 
     private final CanFrameParser canFrameParser = new CanFrameParser();
 
+    /**
+     * 解析一个完整 Payload。
+     */
     public PayloadParseResult parse(String payloadHex) {
         HexReader reader = new HexReader(payloadHex);
-        reader.require(2 + 4 + 2 + 4 + 1 + CRC_BYTES);
 
-        // 1. 最外层 Header：2 byte
-        String headerHex = reader.readHex(OUTER_HEADER_BYTES);
+        // 1. 读取最外层固定头部。
+        reader.require(HEADER_BYTES
+                + START_TIME_SEC_BYTES
+                + START_TIME_MSEC_BYTES
+                + PACKET_LENGTH_BYTES
+                + COMPRESS_FLAG_BYTES
+                + CRC_BYTES);
 
-        // 2. 开始时间：秒 4 byte + 毫秒 2 byte
+        String headerHex = reader.readHex(HEADER_BYTES);
+        if (!EXPECTED_HEADER.equalsIgnoreCase(headerHex)) {
+            throw new PayloadParseException(
+                    "Payload Header 错误，期望 " + EXPECTED_HEADER + "，实际 " + headerHex,
+                    0);
+        }
+
+        // 2. Start Time：秒 4 byte + 毫秒 2 byte。
         long startTimeSec = reader.readUInt32();
         int startTimeMsec = reader.readUInt16();
 
-        // 3. packet length：4 byte
-        long packetLength = reader.readUInt32();
+        // 3. Packet Length：单位为 byte，表示 CompressFlag 后面的 Data 长度。
+        long packetLengthLong = reader.readUInt32();
+        if (packetLengthLong > Integer.MAX_VALUE) {
+            throw new PayloadParseException("Packet Length 超出 Java int 范围", reader.position());
+        }
+        int packetLength = (int) packetLengthLong;
 
-        // 4. compression flag：1 byte
+        // 4. Compression Flag。
         int compressFlag = reader.readUInt8();
 
         PayloadHeader header = new PayloadHeader(
-                headerHex, startTimeSec, startTimeMsec, packetLength, compressFlag);
+                headerHex,
+                startTimeSec,
+                startTimeMsec,
+                packetLengthLong,
+                compressFlag);
 
-        // 最后 1 byte 按旧协议作为 CRC 保留；当前阶段先解析并返回，不验证算法。
-        if (reader.remaining() < CRC_BYTES) {
-            throw new PayloadParseException("Payload 缺少 CRC 字节", reader.position());
-        }
+        // Packet Length 明确决定 Data 的边界，不能再简单地把“剩余所有内容”都当 Data。
+        reader.require(packetLength + CRC_BYTES);
 
-        int bodyLength = reader.remaining() - CRC_BYTES;
-        byte[] body = reader.readBytes(bodyLength);
+        // 5. 读取 Data，并紧接着读取 CRC。
+        byte[] encodedData = reader.readBytes(packetLength);
         String crcHex = reader.readHex(CRC_BYTES);
 
-        // 5. compression flag=0：body 本身就是 deviceType 开始的数据。
-        //    compression flag!=0：body 是压缩数据，按参考实现使用 DEFLATE 解压。
-        byte[] decompressed = compressFlag == 0 ? body : inflate(body);
+        // 如果一个调用只应该解析一个 Payload，那么这里必须已经读完。
+        if (reader.hasRemaining()) {
+            throw new PayloadParseException(
+                    "单个 Payload 解析后仍有剩余数据：" + reader.remaining() + " byte",
+                    reader.position());
+        }
+
+        // 6. 根据 Compression Flag 得到真正的 deviceType -> CAN Payload 数据。
+        byte[] decompressed = compressFlag == 0
+                ? encodedData
+                : inflate(encodedData);
+
         HexReader bodyReader = new HexReader(toHex(decompressed));
 
-        // 6. deviceType：2 byte
+        // 7. Device Type：2 byte。
         int deviceType = bodyReader.readUInt16();
-        // 7. deviceId：2 byte
+
+        // 8. Device ID：2 byte。
         int deviceId = bodyReader.readUInt16();
 
-        // 8. 新协议字段：area 1 + reserved1 1 + reserved2 2
+        // 9. 新协议固定字段：area 1 + reserved1 1 + reserved2 2。
         int deviceArea = bodyReader.readUInt8();
         int reserved1 = bodyReader.readUInt8();
         int reserved2 = bodyReader.readUInt16();
 
-        // 9. sampleDuration：2 byte
+        // 10. Sample Duration：2 byte。
         int sampleDuration = bodyReader.readUInt16();
-        // 10. counter：2 byte
+
+        // 11. Counter：2 byte。
         int counter = bodyReader.readUInt16();
 
         DeviceInfo deviceInfo = new DeviceInfo(
-                deviceType, deviceId, deviceArea, reserved1, reserved2,
-                sampleDuration, counter);
+                deviceType,
+                deviceId,
+                deviceArea,
+                reserved1,
+                reserved2,
+                sampleDuration,
+                counter);
 
-        // 11. 剩余区域全部交给 CAN Frame Parser。
+        // 12. 剩余内容就是 CAN Payload。
         if (!bodyReader.hasRemaining()) {
-            throw new PayloadParseException("设备信息之后没有 CAN Payload", bodyReader.position());
-        }
-
-        if (bodyReader.remaining() < 2) {
-            throw new PayloadParseException("CAN Payload 长度不足以读取 Header", bodyReader.position());
+            throw new PayloadParseException(
+                    "设备信息之后没有 CAN Payload",
+                    bodyReader.position());
         }
 
         return new PayloadParseResult(
@@ -86,24 +141,36 @@ public final class PayloadParser {
     }
 
     /**
-     * 参考旧实现的压缩方式：压缩标志已经在外层读过，因此这里只处理 DEFLATE 数据。
+     * 解压真实样本中的 zlib/DEFLATE 数据。
+     *
+     * <p>注意：外层的 CompressFlag 已经被读取，因此传入这里的数组从
+     * {@code 78 9c ...} 开始，而不是从 {@code 01 78 9c ...} 开始。</p>
      */
     private byte[] inflate(byte[] compressed) {
-        Inflater inflater = new Inflater();
+        Inflater inflater = new Inflater(false);
         inflater.setInput(compressed);
 
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[4096];
             while (!inflater.finished()) {
                 int count = inflater.inflate(buffer);
-                if (count == 0) {
-                    if (inflater.needsInput() || inflater.needsDictionary()) {
-                        throw new PayloadParseException("DEFLATE 数据不完整或无法解压", 0);
-                    }
-                } else {
+
+                if (count > 0) {
                     output.write(buffer, 0, count);
+                    continue;
                 }
+
+                if (inflater.needsDictionary()) {
+                    throw new PayloadParseException("DEFLATE 数据需要预设字典", 0);
+                }
+                if (inflater.needsInput()) {
+                    throw new PayloadParseException("DEFLATE 数据不完整", 0);
+                }
+
+                // 没有输出、也不需要输入/字典，说明 Inflater 已经无法继续推进。
+                throw new PayloadParseException("DEFLATE 解压无法继续", 0);
             }
+
             return output.toByteArray();
         } catch (DataFormatException e) {
             throw new PayloadParseException("DEFLATE 解压失败", 0, e);
