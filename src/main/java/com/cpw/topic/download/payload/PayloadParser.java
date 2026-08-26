@@ -1,6 +1,7 @@
 package com.cpw.topic.download.payload;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
@@ -172,7 +173,7 @@ public final class PayloadParser {
             }
 
             return output.toByteArray();
-        } catch (DataFormatException e) {
+        } catch (DataFormatException | IOException e) {
             throw new PayloadParseException("DEFLATE 解压失败", 0, e);
         } finally {
             inflater.end();
