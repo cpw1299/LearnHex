@@ -1,0 +1,240 @@
+server:
+  port: 39300
+
+spring:
+  application:
+    name: learn-hex
+
+  profiles:
+    active: dev
+
+  main:
+    allow-bean-definition-overriding: true
+
+  data-server: 192.168.56.109
+mysql-server: ${data-server}
+tdengine-server: ${data-server}
+redis-server: ${data-server}
+spring:
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  datasource:
+    dynamic:
+      seata: false
+      primary: mysql
+      datasource:
+        mysql:
+          driver-class-name: com.mysql.cj.jdbc.Driver
+          url: "jdbc:mysql://${mysql-server}:3306/locomotive_maintenance2?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Shanghai&allowMultiQueries=true"
+          type: com.zaxxer.hikari.HikariDataSource
+          username: root
+          password: 123456
+          auto-commit: true
+          connection-test-query: select now() from dual
+          pool-name: MysqlHikariCP
+          hikari:
+            maximum-pool-size: 5
+            minimum-idle: 5
+            connection-test-query: select now() from dual
+        tdengine:
+          driver-class-name: com.taosdata.jdbc.rs.RestfulDriver
+          type: com.zaxxer.hikari.HikariDataSource
+          url: "jdbc:TAOS-RS://${tdengine-server}:6041/phm_local_data?characterEncoding=utf-8&user=root&password=taosdata"
+          username: root
+          password: taosdata
+          auto-commit: true
+          connection-test-query: select server_status()
+          pool-name: TDEngineHikariCP
+          hikari:
+            maximum-pool-size: 5
+            minimum-idle: 5
+            connection-test-query: select server_status()
+            connection-timeout: 30000
+  redis:
+    host: ${redis-server}
+    port: 6379
+    database: 4
+
+mybatis-plus:
+  type-aliases-package: com.cpw.*.entity.*,com.cpw.*.domain.*
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+    map-underscore-to-camel-case: true
+
+mqtt:
+  # Paho 客户端配置
+  broker-url: tcp://192.168.56.101:1883
+  client-id: learn-hex-client
+  username: admin
+  password: 1qaz2wsx
+  connection-timeout: 30
+  keep-alive-interval: 60
+  enabled: true
+  # 订阅主题列表
+  topics:
+    - name: interact/#
+      qos: 1
+    - name: beidou/#
+      qos: 1
+    - name: download/#
+      qos: 1
+
+  # 业务主题（原有配置保留）
+  broker: tcp://192.168.56.101:1883
+  Qos: 1
+
+feign:
+  client:
+    config:
+      default:
+        connect-timeout: 300000
+        read-timeout: 300000
+
+# 运行数据查询字段白名单配置
+run-data:
+  tables:
+    - cha2c1_status_data_%s_%s_a_bms12_ccu
+    - cha2c1_status_data_%s_%s_a_bms34_ccu
+    - cha2c1_status_data_%s_%s_a_tcu1_ccu
+    - cha2c1_status_data_%s_%s_a_tcu2_ccu
+    - cha2c1_status_data_%s_%s_a_ccu_bms12
+    - cha2c1_status_data_%s_%s_a_ccu_bms34
+    - cha2c1_status_data_%s_%s_a_ccu_tcu1
+    - cha2c1_status_data_%s_%s_a_ccu_tcu2
+    - cha2c1_status_data_%s_%s_a_ccu_ddu
+    - cha2c1_status_data_%s_%s_a_ccu_bcu
+    - cha2c1_status_data_%s_%s_a_bcc_ccu
+    - cha2c1_status_data_%s_%s_a_whm_ccu
+    - cha2c1_status_data_%s_%s_a_riom1_ccu
+  fields:
+    bms12_ccu:
+      - BMS1_DCZHDZT_SOC
+      - BMS1_XDCZDY
+      - BMS1_XDCZDL
+      - BMS2_DCZHDZT_SOC
+      - BMS2_XDCZDY
+      - BMS2_XDCZDL
+    bms34_ccu:
+      - BMS3_DCZHDZT_SOC
+      - BMS3_XDCZDY
+      - BMS3_XDCZDL
+      - BMS4_DCZHDZT_SOC
+      - BMS4_XDCZDY
+      - BMS4_XDCZDL
+    tcu1_ccu:
+      - TCU1_JCSD
+      - TCU1_JPJGLJSZ
+      - MC1QYLSJZ
+      - MC1DZDLSJZ
+      - MC2QYLSJZ
+      - MC2DZDLSJZ
+      - MC3QYLSJZ
+      - MC3DZDLSJZ
+    tcu2_ccu:
+      - TCU2_JJCSD
+      - TCU2_JPJGLJSZ
+      - MC4QYLSJZ
+      - MC4DZDLSJZ
+      - MC5QYLSJZ
+      - MC5DZDLSJZ
+      - MC6QYLSJZ
+      - MC6DZDLSJZ
+    ccu_bms12:
+      - BMS12_KNCDMS  # 库内充电模式
+      - BMS12_MXDY    # 母线电压
+    ccu_bms34:
+      - BMS34_KNCDMS  # 库内充电模式
+      - BMS34_MXDY    # 母线电压
+    ccu_tcu1:
+      - QYZDJW       # 牵引/制动级位
+      - LGMS         # 联挂模式
+      - KNCSMS       # 库内测试模式
+      - KN380VCDMS   # 库内380V充电模式
+      - KY380VCDYXGZ # 库内380V充电允许
+      - KS1500VCDMS  # 快速1500V充电模式
+      - CLXSZ        # 车辆限速值
+      - JZDZL        # 紧急制动指令
+      - DC1SOC       # 电池1 SOC
+      - DC2SOC       # 电池2 SOC
+      - QYFS         # 牵引封锁
+    ccu_tcu2:
+      - QYZDJW       # 牵引/制动级位
+      - LGMS         # 联挂模式
+      - KNCSMS       # 库内测试模式
+      - KN380VCDMS   # 库内380V充电模式
+      - KY380VCDYXGZ # 库内380V充电允许
+      - KS1500VCDMS  # 快速1500V充电模式
+      - CLXSZ        # 车辆限速值
+      - JZDZL        # 紧急制动指令
+      - DC1SOC       # 电池1 SOC
+      - DC2SOC       # 电池2 SOC
+      - QYFS         # 牵引封锁
+    ccu_ddu:
+      - FXXQ   # 方向向前
+      - FXXH   # 方向向后
+      - FXLW   # 方向零位
+      - QYZL   # 牵引指令
+      - ZDZL   # 制动指令
+      - DXZL   # 惰行指令（文档写“情行”，实际为惰行）
+      - KQZDSJ # 空气制动施加
+      - KQZDHJ # 空气制动缓解
+      - ZZCS   # 正在测试
+      - QYGK   # 牵引工况
+      - DZGK   # 电制工况
+      - QYFS   # 牵引封锁
+    ccu_bcu:
+      - FXBZ1         # 方向标志1
+      - FXBZ2         # 方向标志2
+      - CCUJJZDQQCC   # CCU紧急制动请求
+    bcc_ccu:   # 可选/分析增强
+      - CDZT       # 充电状态
+      - CDJSCZDL   # 充电机输出总电流
+    whm_ccu:
+      - BMT1ZXDN   # BMT1正向电能
+      - BMT2ZXDN   # BMT2正向电能
+      - BMTZZXDN   # BMT总正向电能
+      - BMT1DZDN   # BMT1电制电能（再生/电制能量）
+      - BMT2DZDN   # BMT2电制电能
+      - BMTZDZDN   # BMT总电制电能
+      - DC1ZXDN    # 直流1正向电能
+      - DC1FXDN    # 直流1反向电能
+      - DC2ZXDN    # 直流2正向电能
+      - DC2FXDN    # 直流2反向电能
+    riom1_ccu:   # 可选/分析增强
+      - SKQ1MNLSR  # 可控器1模拟量输入
+      - SKQ2MNLSR  # 可控器2模拟量输入
+      - CDMS1      # 纯电模式1
+      - CDMS2      # 纯电模式2
+      - HDMS1      # 混动模式1
+      - HDMS2      # 混动模式2
+
+logging:
+  level:
+    root: DEBUG
+    jdk: WARN
+    org.apache.catalina.authenticator: DEBUG
+    org.apache.catalina: WARN
+    org.apache.coyote.http11: WARN
+    org.apache.http: INFO
+#    org.apache.http.client: DEBUG
+#    org.apache.http.headers: DEBUG
+#    org.apache.http.wire: DEBUG
+#    org.apache.http.impl: DEBUG
+    org.apache.tomcat.util: WARN
+    org.mybatis.spring.mapper: DEBUG
+    org.eclipse: WARN
+    com.zaxxer.hikari: DEBUG        # 开启HikariCP连接池日志
+    com.baomidou.dynamic: DEBUG     # 开启baomidou动态数据源日志
+    com.zaxxer.hikari.pool.HikariPool: WARN
+    com.cpw.vehicle_beidou.mapper: DEBUG
+    org.springframework.boot.autoconfigure.logging.ConditionEvaluationReportLoggingListener: WARN
+    org.springframework.beans.support.DefaultListableBeanFactory: WARN
+    org.springframework.context.support.DefaultListableBeanFactory: WARN
+    org.springframework.web.servlet: WARN
+    org.mybatis.spring.mapper.ClassPathMapperScanner: WARN
+    com.taosdata.jdbc: DEBUG
+    com.zaxxer.hikari.pool.PoolBase: WARN
